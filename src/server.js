@@ -4,7 +4,6 @@ import express from "express";
 import { configureOpenAI } from "./config/openai.js";
 import { env } from "./config/env.js";
 import { executeQuery } from "./workflow/executeQuery.js";
-import { ensureDatabase } from "./db/init.js";
 
 configureOpenAI();
 
@@ -17,6 +16,8 @@ app.get("/health", (_req, res) => {
     model: env.modelName,
     database: env.mongoDbName,
     collection: env.mongoCollection,
+    dataLayer: "mcp",
+    mcpServer: "mongodb-mcp-server",
   });
 });
 
@@ -43,6 +44,9 @@ app.post("/api/query", async (req, res) => {
         operation: outcome.operation,
         result: null,
         error: outcome.error,
+        database: outcome.database,
+        collection: outcome.collection,
+        dataLayer: outcome.dataLayer,
       });
     }
 
@@ -51,6 +55,7 @@ app.post("/api/query", async (req, res) => {
       result: outcome.result,
       database: outcome.database,
       collection: outcome.collection,
+      dataLayer: outcome.dataLayer,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -62,20 +67,11 @@ app.use((_req, res) => {
   res.status(404).json({ error: "Not found" });
 });
 
-async function start() {
-  const dbInfo = await ensureDatabase();
-  console.log(
-    `Mongoose connected: ${dbInfo.database}.${dbInfo.collection} (${dbInfo.documentCount} docs${dbInfo.seeded ? ", seeded" : ""})`,
-  );
-
-  app.listen(env.port, () => {
-    console.log(`MongoDB agent API listening on http://localhost:${env.port}`);
-    console.log(`POST http://localhost:${env.port}/api/query`);
-    console.log(`GET  http://localhost:${env.port}/health`);
-  });
-}
-
-start().catch((err) => {
-  console.error(err);
-  process.exit(1);
+app.listen(env.port, () => {
+  console.log(`MongoDB agent API (LangGraph + OpenAI Agents + MCP)`);
+  console.log(`Listening on http://localhost:${env.port}`);
+  console.log(`Target: ${env.mongoDbName}.${env.mongoCollection}`);
+  console.log(`POST http://localhost:${env.port}/api/query`);
+  console.log(`GET  http://localhost:${env.port}/health`);
+  console.log(`Optional seed: npm run db:init`);
 });

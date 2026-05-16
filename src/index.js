@@ -7,9 +7,10 @@ import { env } from "./config/env.js";
 import { executeQuery } from "./workflow/executeQuery.js";
 
 function printBanner() {
-  console.log("\nMongoDB Atlas Agent (LangGraph + OpenAI Agents + Mongoose)");
+  console.log("\nMongoDB Atlas Agent (LangGraph + OpenAI Agents + MCP)");
   console.log(`Model: ${env.modelName}`);
-  console.log(`Database: ${env.mongoDbName}.${env.mongoCollection}`);
+  console.log(`MCP target: ${env.mongoDbName}.${env.mongoCollection}`);
+  console.log(`Optional seed: npm run db:init`);
   console.log("\nOperations: read | create | update | delete");
   console.log('Type a natural-language request, or "exit" to quit.\n');
 }

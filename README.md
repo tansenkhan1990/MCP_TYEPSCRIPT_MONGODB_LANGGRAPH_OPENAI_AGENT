@@ -1,6 +1,6 @@
 # MongoDB Atlas CRUD Agents
 
-Multi-agent system for natural-language **Create, Read, Update, and Delete** operations on **MongoDB Atlas**. Built with **LangGraph** (workflow routing), **OpenAI Agents SDK** (specialist agents), and **Mongoose** (schema + CRUD). On startup the app **creates the database/collection if missing** and seeds sample movies when empty.
+Multi-agent system for natural-language **Create, Read, Update, and Delete** operations on **MongoDB Atlas**. Built with **LangGraph** (workflow routing), **OpenAI Agents SDK** (four specialist agents), and the official **MongoDB MCP Server** (all CRUD via MCP tools). Optional `npm run db:init` uses Mongoose only to seed sample data.
 
 Ask questions in plain English via the **CLI** or **Express REST API**. LangGraph classifies each request and routes it to the correct specialist agent.
 
@@ -35,8 +35,9 @@ Ask questions in plain English via the **CLI** or **Express REST API**. LangGrap
 
 - **Four specialist agents** — one each for read, create, update, and delete
 - **LangGraph workflow** — automatic routing based on your question
-- **Mongoose CRUD** — typed movie schema; auto-creates `sample_mflix.movies` (configurable)
-- **Auto-seed** — inserts 2 sample movies when the collection is empty
+- **MongoDB MCP CRUD** — `find`, `insert-many`, `update-many`, `delete-many` via official MCP server
+- **Filtered MCP tools per agent** — least-privilege tool allowlists per operation
+- **Optional Mongoose seed** — `npm run db:init` creates collection + sample movies for demos
 - **Least-privilege agent tools** — each agent only sees tools for its operation
 - **Ollama or OpenAI** — any OpenAI-compatible Chat Completions API
 - **CLI and HTTP API** — interactive terminal or `POST /api/query`
@@ -50,7 +51,8 @@ Ask questions in plain English via the **CLI** or **Express REST API**. LangGrap
 |-------|-------------------|
 | Workflow | [@langchain/langgraph](https://www.npmjs.com/package/@langchain/langgraph) |
 | Agents | [@openai/agents](https://www.npmjs.com/package/@openai/agents) |
-| ODM | [Mongoose](https://www.npmjs.com/package/mongoose) |
+| Database (agents) | [mongodb-mcp-server](https://www.npmjs.com/package/mongodb-mcp-server) via MCP stdio |
+| Optional seed | [Mongoose](https://www.npmjs.com/package/mongoose) (`npm run db:init` only) |
 | HTTP API | [Express](https://expressjs.com/) 5.x |
 | LLM | Ollama (default) or OpenAI API |
 | Runtime | Node.js 20.19+ (ES modules) |
@@ -85,33 +87,35 @@ flowchart TB
     DA[MongoDB Delete Agent]
   end
 
-  subgraph data [Mongoose]
-    Schema[movie.schema.js]
-    SVC[movie.service.js]
+  subgraph mcp [MongoDB MCP stdio]
+    MCPRead[read tools]
+    MCPCreate[create tools]
+    MCPUpdate[update tools]
+    MCPDelete[delete tools]
   end
 
   Atlas[(MongoDB Atlas)]
 
   CLI --> executeQuery
   API --> executeQuery
-  executeQuery --> Init[ensureDatabase]
-  Init --> Atlas
   executeQuery --> Route
   ReadN --> RA
   CreateN --> CA
   UpdateN --> UA
   DeleteN --> DA
-  RA & CA & UA & DA --> SVC
-  SVC --> Schema
-  Schema --> Atlas
+  RA --> MCPRead
+  CA --> MCPCreate
+  UA --> MCPUpdate
+  DA --> MCPDelete
+  MCPRead & MCPCreate & MCPUpdate & MCPDelete --> Atlas
 ```
 
 **High-level flow**
 
-1. `ensureDatabase()` connects with Mongoose, creates the collection if needed, seeds when empty.
-2. LangGraph **route** node classifies the operation: `read` | `create` | `update` | `delete`.
-3. The matching **agent** runs with Mongoose function tools (`find_movies`, `create_movie`, etc.).
-4. The final answer and `operation` are returned to the client.
+1. LangGraph **route** node classifies the operation: `read` | `create` | `update` | `delete`.
+2. The matching agent node starts a **filtered MongoDB MCP server** (stdio), connects, and runs the OpenAI Agent.
+3. The agent calls MCP tools (`find`, `insert-many`, `update-many`, `delete-many`, etc.) against Atlas.
+4. MCP disconnects; the final answer and `operation` are returned (`dataLayer: "mcp"`).
 
 ---
 
@@ -136,36 +140,33 @@ The API and CLI responses include `operation` so you can see which route was cho
 
 ---
 
-## Mongoose schema and database init
+## MongoDB MCP integration
 
 | File | Purpose |
 |------|---------|
-| `src/schemas/movie.schema.json` | JSON Schema (documentation / validation reference) |
-| `src/schemas/movie.schema.js` | Mongoose schema + `getMovieModel()` |
-| `src/db/connect.js` | Atlas connection via `MONGO_DB_CONNECTION_STRING` + `MONGO_DB_NAME` |
-| `src/db/init.js` | Creates collection if missing, builds indexes, seeds 2 movies when empty |
-| `src/services/movie.service.js` | `find`, `count`, `create`, `update`, `delete` helpers |
+| `src/mcp/mongodbServer.js` | `MCPServerStdio` + per-operation tool allowlists |
+| `src/mcp/context.js` | Default database/collection hints for agent instructions |
 
-Initialize without starting the API:
+MCP runs **without** `--readOnly` so create/update/delete tools are available. Each agent only receives tools for its operation.
+
+| Agent | Route | MCP tools (allowlist) |
+|-------|-------|------------------------|
+| **Read** | `read` | `find`, `aggregate`, `count`, `list-databases`, `list-collections`, … |
+| **Create** | `create` | `insert-many`, `create-collection`, `create-index` |
+| **Update** | `update` | `update-many`, `rename-collection` |
+| **Delete** | `delete` | `delete-many`, `drop-collection`, `drop-index` |
+
+### Optional: seed data with Mongoose (`npm run db:init`)
+
+Agents use **MCP only**. For demo data, optionally run:
 
 ```bash
 npm run db:init
 ```
 
-MongoDB creates the **database** on first write; `init.js` explicitly creates the **collection** and seed data.
+This uses Mongoose (`src/db/init.js`, `src/schemas/movie.schema.js`) to create the collection and insert 2 sample movies if empty. It does **not** affect the agent MCP path.
 
 Default target (from `.env`): **`sample_mflix.movies`**
-
-## Agents and tools
-
-Each agent uses **Mongoose function tools** (`src/agents/tools/movieTools.js`):
-
-| Agent | Route | Tools |
-|-------|-------|-------|
-| **Read** | `read` | `find_movies`, `count_movies`, `get_movie_by_id` |
-| **Create** | `create` | `create_movie`, `create_movies` |
-| **Update** | `update` | `update_movies` |
-| **Delete** | `delete` | `delete_movies` |
 
 ---
 
@@ -262,7 +263,7 @@ Start **Ollama** (if used) and ensure Atlas is reachable, then:
 | **CLI interactive** | `npm start` |
 | **CLI (watch mode)** | `npm run dev` |
 
-Typical first request (API or CLI) takes **15–30+ seconds** while MCP connects and the model runs tool calls.
+Typical first request (API or CLI) takes **15–30+ seconds** while the MCP server starts, connects to Atlas, and the model runs tool calls.
 
 ---
 
@@ -510,17 +511,17 @@ sequenceDiagram
   participant E as executeQuery
   participant G as LangGraph
   participant A as Specialist Agent
-  participant S as Mongoose service
+  participant M as MongoDB MCP
   participant D as Atlas
 
   C->>E: question
   E->>G: invoke workflow
   G->>G: classify operation
-  G->>A: run agent node
-  A->>S: tool calls find_movies / create_movie / etc.
-  S->>D: MongoDB operations
-  D-->>S: results
-  S-->>A: tool outputs
+  G->>A: connect MCP + run agent
+  A->>M: find / insert-many / update-many / delete-many
+  M->>D: MongoDB operations
+  D-->>M: results
+  M-->>A: tool outputs
   A-->>G: finalOutput
   G-->>E: operation + result
   E-->>C: JSON or console output
@@ -542,16 +543,14 @@ Shared entry point: `src/workflow/executeQuery.js` (used by CLI and API).
     ├── index.js              # CLI
     ├── server.js             # Express API
     ├── config/
-    ├── db/
+    ├── mcp/
+    │   ├── mongodbServer.js    # MCPServerStdio + tool filters
+    │   └── context.js
+    ├── db/                   # optional seed only
     │   ├── connect.js
-    │   └── init.js           # create collection + seed
-    ├── schemas/
-    │   ├── movie.schema.json
-    │   └── movie.schema.js
-    ├── services/
-    │   └── movie.service.js  # Mongoose CRUD
+    │   └── init.js
+    ├── schemas/              # optional seed only
     ├── agents/
-    │   ├── tools/movieTools.js
     │   ├── readAgent.js
     │   ├── createAgent.js
     │   ├── updateAgent.js

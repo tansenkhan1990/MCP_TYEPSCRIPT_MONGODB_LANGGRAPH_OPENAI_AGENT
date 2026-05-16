@@ -1,19 +1,19 @@
 import { Agent } from "@openai/agents";
 import { getModelName } from "../config/openai.js";
 import { sharedMongoRules } from "./baseInstructions.js";
-import { createTools } from "./tools/movieTools.js";
 
-export function createCreateAgent() {
+export function createCreateAgent(mcpServer) {
   return new Agent({
-    name: "MongoDB Create Agent",
+    name: "MongoDB Create Agent (MCP)",
     instructions: [
       sharedMongoRules(),
-      "Your only job is CREATE operations using create_movie or create_movies.",
-      "Validate that title is present on every document.",
-      "After inserting, summarize inserted ids and titles from tool results.",
+      "Your only job is CREATE operations via MCP: insert-many (and create-collection only when explicitly requested).",
+      "Use insert-many for one or many documents. Validate document shape before insert.",
+      "Summarize inserted count and example _id values from tool output.",
     ].join("\n"),
     model: getModelName(),
-    tools: createTools,
+    mcpServers: [mcpServer],
+    mcpConfig: { includeServerInToolNames: true },
     modelSettings: {
       toolChoice: "required",
       temperature: 0.2,

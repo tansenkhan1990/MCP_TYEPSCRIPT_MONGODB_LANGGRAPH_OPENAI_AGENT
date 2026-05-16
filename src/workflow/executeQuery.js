@@ -1,8 +1,7 @@
-import { env } from "../config/env.js";
 import { runWorkflow } from "./graph.js";
 
 /**
- * Runs LangGraph workflow (DB init happens inside runWorkflow).
+ * LangGraph orchestration → OpenAI Agent (MCP tools) → MongoDB Atlas.
  */
 export async function executeQuery(question) {
   const state = await runWorkflow(question);
@@ -10,7 +9,8 @@ export async function executeQuery(question) {
     operation: state.operation,
     result: state.result,
     error: state.error,
-    database: env.mongoDbName,
-    collection: env.mongoCollection,
+    database: state.database,
+    collection: state.collection,
+    dataLayer: state.dataLayer,
   };
 }
