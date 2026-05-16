@@ -1,7 +1,5 @@
 # MongoDB Atlas CRUD Agents
 
-[![CI](https://github.com/tansenkhan1990/MCP_TYEPSCRIPT_MONGODB_LANGGRAPH_OPENAI_AGENT/actions/workflows/ci.yml/badge.svg)](https://github.com/tansenkhan1990/MCP_TYEPSCRIPT_MONGODB_LANGGRAPH_OPENAI_AGENT/actions/workflows/ci.yml)
-
 Multi-agent system for natural-language **Create, Read, Update, and Delete** operations on **MongoDB Atlas**. Built with **LangGraph** (workflow routing), **OpenAI Agents SDK** (specialist agents), and **Mongoose** (schema + CRUD). On startup the app **creates the database/collection if missing** and seeds sample movies when empty.
 
 Ask questions in plain English via the **CLI** or **Express REST API**. LangGraph classifies each request and routes it to the correct specialist agent.
@@ -26,6 +24,7 @@ Ask questions in plain English via the **CLI** or **Express REST API**. LangGrap
 - [Request lifecycle](#request-lifecycle)
 - [Project structure](#project-structure)
 - [npm scripts](#npm-scripts)
+- [Git workflow (manual)](#git-workflow-manual)
 - [Security](#security)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
@@ -192,7 +191,7 @@ Ensure your Atlas cluster allows connections from your IP ([Network Access](http
 ## Installation
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/tansenkhan1990/MCP_TYEPSCRIPT_MONGODB_LANGGRAPH_OPENAI_AGENT.git
 cd MCP_TYEPSCRIPT_MONGODB_LANGGRAPH_OPENAI_AGENT
 
 npm install
@@ -477,18 +476,17 @@ sequenceDiagram
   participant E as executeQuery
   participant G as LangGraph
   participant A as Specialist Agent
-  participant M as MongoDB MCP
+  participant S as Mongoose service
   participant D as Atlas
 
   C->>E: question
   E->>G: invoke workflow
   G->>G: classify operation
   G->>A: run agent node
-  A->>M: connect stdio MCP
-  A->>M: tool calls find / insert / etc.
-  M->>D: MongoDB operations
-  D-->>M: results
-  M-->>A: tool outputs
+  A->>S: tool calls find_movies / create_movie / etc.
+  S->>D: MongoDB operations
+  D-->>S: results
+  S-->>A: tool outputs
   A-->>G: finalOutput
   G-->>E: operation + result
   E-->>C: JSON or console output
@@ -538,9 +536,45 @@ Shared entry point: `src/workflow/executeQuery.js` (used by CLI and API).
 | `npm start` | CLI (interactive or pass question after `--`) |
 | `npm run dev` | CLI with Node `--watch` |
 | `npm run db:init` | Connect, create collection, seed if empty |
-| `npm run verify` | CI-safe router smoke test (no Atlas/Ollama) |
+| `npm run verify` | Local router smoke test (no Atlas/Ollama) |
 | `npm run api` | Start Express API on `PORT` |
 | `npm run api:dev` | API with Node `--watch` |
+
+---
+
+## Git workflow (manual)
+
+This project does **not** use GitHub Actions, Dependabot, or `gh` CLI. Commit and push with standard **git** only.
+
+### First-time setup
+
+```bash
+git clone https://github.com/tansenkhan1990/MCP_TYEPSCRIPT_MONGODB_LANGGRAPH_OPENAI_AGENT.git
+cd MCP_TYEPSCRIPT_MONGODB_LANGGRAPH_OPENAI_AGENT
+```
+
+### After you change code
+
+```bash
+git status
+git add .
+git commit -m "Describe your change"
+git push origin main
+```
+
+### Before every commit
+
+- Do **not** add `.env` (secrets stay local; only `.env.example` is tracked).
+- Run `npm run verify` optionally (quick local check).
+- Run `npm run api` or `npm run db:init` to test against Atlas when relevant.
+
+### Remote
+
+Default remote (if already configured):
+
+```text
+origin  https://github.com/tansenkhan1990/MCP_TYEPSCRIPT_MONGODB_LANGGRAPH_OPENAI_AGENT.git
+```
 
 ---
 
@@ -560,7 +594,7 @@ Shared entry point: `src/workflow/executeQuery.js` (used by CLI and API).
 |---------|-------------|
 | `Connection refused` on port 11434 | Start Ollama: `ollama serve` |
 | Model not found | `ollama pull <LOCAL_MODEL_NAME>` or fix model name in `.env` |
-| MCP request timed out | Retry; confirm Atlas IP allowlist; first MCP start can be slow |
+| Atlas connection failed | Check connection string, IP allowlist, and DB user permissions |
 | Only `admin` / `local` before init | Run `npm run db:init` or start API (auto-inits `sample_mflix`) |
 | `[Tracing client error 401]` | Tracing should be off; ensure `OPENAI_AGENTS_DISABLE_TRACING=1` and restart |
 | API returns 500 | Read `error` in JSON body; check Ollama logs and Atlas connectivity |
