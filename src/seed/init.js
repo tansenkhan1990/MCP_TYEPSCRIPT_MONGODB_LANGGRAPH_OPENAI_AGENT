@@ -1,5 +1,5 @@
 import { connectDatabase } from "./connect.js";
-import { getMovieModel } from "../schemas/movie.schema.js";
+import { getMovieModel } from "./movie.schema.js";
 import { env } from "../config/env.js";
 
 const SEED_MOVIES = [

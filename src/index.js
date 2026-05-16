@@ -3,31 +3,9 @@ import "./config/tracing.js";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { configureOpenAI } from "./config/openai.js";
-import { env } from "./config/env.js";
-import { executeQuery } from "./workflow/executeQuery.js";
-
-function printBanner() {
-  console.log("\nMongoDB Atlas Agent (LangGraph + OpenAI Agents + MCP)");
-  console.log(`Model: ${env.modelName}`);
-  console.log(`MCP target: ${env.mongoDbName}.${env.mongoCollection}`);
-  console.log(`Optional seed: npm run db:init`);
-  console.log("\nOperations: read | create | update | delete");
-  console.log('Type a natural-language request, or "exit" to quit.\n');
-}
-
-async function handleQuery(query) {
-  console.log("\nRouting request through LangGraph workflow...\n");
-  const outcome = await executeQuery(query);
-
-  console.log(`Operation: ${outcome.operation}`);
-  if (outcome.error) {
-    console.error(`Error: ${outcome.error}`);
-    return;
-  }
-  console.log("\n--- Agent response ---\n");
-  console.log(outcome.result);
-  console.log("\n----------------------\n");
-}
+import { printBanner } from "./cli/banner.js";
+import { handleQuery } from "./cli/handleQuery.js";
+import { toErrorMessage } from "./lib/errors.js";
 
 async function runInteractive() {
   const rl = readline.createInterface({ input, output });
@@ -41,7 +19,7 @@ async function runInteractive() {
     try {
       await handleQuery(query);
     } catch (err) {
-      console.error("Workflow failed:", err instanceof Error ? err.message : err);
+      console.error("Workflow failed:", toErrorMessage(err));
     }
   }
 

@@ -1,6 +1,6 @@
 # MongoDB Atlas CRUD Agents
 
-Multi-agent system for natural-language **Create, Read, Update, and Delete** operations on **MongoDB Atlas**. Built with **LangGraph** (workflow routing), **OpenAI Agents SDK** (four specialist agents), and the official **MongoDB MCP Server** (all CRUD via MCP tools). Optional `npm run db:init` uses Mongoose only to seed sample data.
+Multi-agent system for natural-language **Create, Read, Update, and Delete** on **MongoDB Atlas**. **LangGraph** routes each request; **OpenAI Agents SDK** runs one specialist per operation; the official **MongoDB MCP Server** performs all agent CRUD. Optional `npm run db:init` seeds demo data with Mongoose (agents never use Mongoose).
 
 Ask questions in plain English via the **CLI** or **Express REST API**. LangGraph classifies each request and routes it to the correct specialist agent.
 
@@ -11,9 +11,11 @@ Ask questions in plain English via the **CLI** or **Express REST API**. LangGrap
 - [Features](#features)
 - [Tech stack](#tech-stack)
 - [Architecture](#architecture)
+- [Code organization](#code-organization)
 - [How routing works](#how-routing-works)
-- [Mongoose schema and database init](#mongoose-schema-and-database-init)
-- [Agents and tools](#agents-and-tools)
+- [MongoDB MCP integration](#mongodb-mcp-integration)
+- [Agents](#agents)
+- [Optional seed data (Mongoose)](#optional-seed-data-mongoose)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Configuration](#configuration)
@@ -33,12 +35,11 @@ Ask questions in plain English via the **CLI** or **Express REST API**. LangGrap
 
 ## Features
 
-- **Four specialist agents** — one each for read, create, update, and delete
-- **LangGraph workflow** — automatic routing based on your question
+- **Four specialist agents** — one logical agent per CRUD operation (shared factory, per-operation instructions)
+- **LangGraph workflow** — automatic routing based on your question (no extra LLM call for routing)
 - **MongoDB MCP CRUD** — `find`, `insert-many`, `update-many`, `delete-many` via official MCP server
-- **Filtered MCP tools per agent** — least-privilege tool allowlists per operation
-- **Optional Mongoose seed** — `npm run db:init` creates collection + sample movies for demos
-- **Least-privilege agent tools** — each agent only sees tools for its operation
+- **Least-privilege MCP tools** — each operation gets a filtered tool allowlist only
+- **Optional Mongoose seed** — `npm run db:init` creates collection + sample movies for demos (agents still use MCP)
 - **Ollama or OpenAI** — any OpenAI-compatible Chat Completions API
 - **CLI and HTTP API** — interactive terminal or `POST /api/query`
 - **Tracing disabled by default** — no OpenAI trace export when using local models
@@ -81,17 +82,12 @@ flowchart TB
   end
 
   subgraph agents [OpenAI Agents SDK]
-    RA[MongoDB Read Agent]
-    CA[MongoDB Create Agent]
-    UA[MongoDB Update Agent]
-    DA[MongoDB Delete Agent]
+    Factory[createMongoAgent]
+    RunMCP[runWithMcp]
   end
 
   subgraph mcp [MongoDB MCP stdio]
-    MCPRead[read tools]
-    MCPCreate[create tools]
-    MCPUpdate[update tools]
-    MCPDelete[delete tools]
+    MCP[MCP server per operation]
   end
 
   Atlas[(MongoDB Atlas)]
@@ -99,23 +95,66 @@ flowchart TB
   CLI --> executeQuery
   API --> executeQuery
   executeQuery --> Route
-  ReadN --> RA
-  CreateN --> CA
-  UpdateN --> UA
-  DeleteN --> DA
-  RA --> MCPRead
-  CA --> MCPCreate
-  UA --> MCPUpdate
-  DA --> MCPDelete
-  MCPRead & MCPCreate & MCPUpdate & MCPDelete --> Atlas
+  ReadN --> RunMCP
+  CreateN --> RunMCP
+  UpdateN --> RunMCP
+  DeleteN --> RunMCP
+  RunMCP --> Factory
+  RunMCP --> MCP
+  Factory --> MCP
+  MCP --> Atlas
 ```
 
 **High-level flow**
 
-1. LangGraph **route** node classifies the operation: `read` | `create` | `update` | `delete`.
-2. The matching agent node starts a **filtered MongoDB MCP server** (stdio), connects, and runs the OpenAI Agent.
-3. The agent calls MCP tools (`find`, `insert-many`, `update-many`, `delete-many`, etc.) against Atlas.
-4. MCP disconnects; the final answer and `operation` are returned (`dataLayer: "mcp"`).
+1. **Client** (`src/index.js` CLI or `src/http/app.js` API) calls `executeQuery(question)`.
+2. LangGraph **route** node classifies the operation: `read` | `create` | `update` | `delete`.
+3. The matching **agent node** calls `runAgentWithMcp()` — starts a filtered MCP stdio server, builds one agent via `createMongoAgent()`, runs the OpenAI Agents `Runner`.
+4. The agent calls MCP tools (`find`, `insert-many`, `update-many`, `delete-many`, etc.) against Atlas.
+5. MCP disconnects; response includes `operation`, `result`, `database`, `collection`, and `dataLayer: "mcp"`.
+
+**Counts**
+
+| Layer | Count | Notes |
+|-------|-------|--------|
+| LangGraph nodes | 5 | `route` + 4 CRUD agent nodes (built from `OPERATIONS`) |
+| OpenAI agents | 4 | Same factory; different instructions + MCP tool filters |
+| MCP servers per request | 1 | Spawned for the routed operation only |
+
+---
+
+## Code organization
+
+The codebase is split by responsibility so shared logic lives in one place:
+
+| Path | Role |
+|------|------|
+| `src/constants/operations.js` | `OPERATIONS`, `normalizeOperation()`, LangGraph node ids |
+| `src/lib/errors.js` | `toErrorMessage()` for CLI/API |
+| `src/lib/parseQuestion.js` | Parse `question` or `query` from JSON body |
+| `src/workflow/router.js` | Keyword scoring → `read` \| `create` \| `update` \| `delete` |
+| `src/workflow/state.js` | LangGraph state annotation |
+| `src/workflow/nodes.js` | `routeNode`, dynamic agent nodes |
+| `src/workflow/graph.js` | Compile graph, `runWorkflow()` |
+| `src/workflow/executeQuery.js` | **Single entry** for CLI + API |
+| `src/agents/definitions.js` | Per-operation names + instructions |
+| `src/agents/factory.js` | `createMongoAgent(operation, mcpServer)` |
+| `src/agents/runWithMcp.js` | Connect MCP → run agent → close |
+| `src/agents/runner.js` | OpenAI Agents `Runner` singleton |
+| `src/agents/baseInstructions.js` | Shared MongoDB rules for all agents |
+| `src/mcp/toolSets.js` | MCP tool allowlists per operation |
+| `src/mcp/mongodbServer.js` | `createMcpServerForOperation()` |
+| `src/mcp/context.js` | Default DB/collection hints in prompts |
+| `src/cli/` | CLI banner and query output |
+| `src/http/app.js` | Express app factory (`createApp()`) |
+| `src/seed/` | Optional Mongoose connect + seed (`npm run db:init` only) |
+| `src/config/` | `env.js`, Ollama/OpenAI client, tracing off |
+| `src/bootstrap.js` | Early env + tracing setup |
+
+Entry points stay thin:
+
+- **CLI:** `src/index.js` → `handleQuery()` → `executeQuery()`
+- **API:** `src/server.js` → `createApp()` → `executeQuery()`
 
 ---
 
@@ -144,7 +183,8 @@ The API and CLI responses include `operation` so you can see which route was cho
 
 | File | Purpose |
 |------|---------|
-| `src/mcp/mongodbServer.js` | `MCPServerStdio` + per-operation tool allowlists |
+| `src/mcp/mongodbServer.js` | `MCPServerStdio` + per-operation MCP servers |
+| `src/mcp/toolSets.js` | Tool allowlists per CRUD operation |
 | `src/mcp/context.js` | Default database/collection hints for agent instructions |
 
 MCP runs **without** `--readOnly` so create/update/delete tools are available. Each agent only receives tools for its operation.
@@ -156,15 +196,45 @@ MCP runs **without** `--readOnly` so create/update/delete tools are available. E
 | **Update** | `update` | `update-many`, `rename-collection` |
 | **Delete** | `delete` | `delete-many`, `drop-collection`, `drop-index` |
 
-### Optional: seed data with Mongoose (`npm run db:init`)
+Full allowlists are defined in `src/mcp/toolSets.js`. Servers are created in `src/mcp/mongodbServer.js` via `createMcpServerForOperation(operation)`.
+
+---
+
+## Agents
+
+There are **four logical specialists**, implemented with one factory instead of four duplicate files:
+
+| File | Purpose |
+|------|---------|
+| `src/agents/definitions.js` | Agent name + role instructions per operation |
+| `src/agents/factory.js` | `createMongoAgent(operation, mcpServer)` |
+| `src/agents/runWithMcp.js` | Lifecycle: connect MCP → run → close |
+| `src/agents/runner.js` | Shared `Runner` with tracing disabled |
+| `src/agents/baseInstructions.js` | Shared rules (use MCP tools, cite DB/collection) |
+
+To add a new operation you would extend `OPERATIONS` in `constants/operations.js`, add router patterns, tool sets, agent definitions, and LangGraph picks up the new node automatically.
+
+---
+
+## Optional seed data (Mongoose)
 
 Agents use **MCP only**. For demo data, optionally run:
 
 ```bash
-npm run db:init
+npm run db:init   # → src/scripts/initDb.js → src/seed/init.js
 ```
 
-This uses Mongoose (`src/db/init.js`, `src/schemas/movie.schema.js`) to create the collection and insert 2 sample movies if empty. It does **not** affect the agent MCP path.
+This uses Mongoose only under `src/seed/`:
+
+| File | Purpose |
+|------|---------|
+| `src/seed/connect.js` | Atlas connection via Mongoose |
+| `src/seed/movie.schema.js` | Movie model + indexes |
+| `src/seed/movie.schema.json` | JSON Schema reference for document shape |
+| `src/seed/init.js` | Create collection if missing, seed 2 movies when empty |
+| `src/scripts/initDb.js` | npm script entry for `db:init` |
+
+It does **not** affect the agent path — agents never import `src/seed/`.
 
 Default target (from `.env`): **`sample_mflix.movies`**
 
@@ -221,7 +291,7 @@ Copy `.env.example` to `.env` and set the values below.
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | LLM base URL; use `http://localhost:11434/v1` for Ollama |
 | `LOCAL_MODEL_NAME` | `gpt-4o-mini` | Model id passed to every agent |
 | `MONGO_DB_NAME` | `sample_mflix` | Database name (created on first write) |
-| `MONGO_COLLECTION` | `movies` | Collection name for the Movie model |
+| `MONGO_COLLECTION` | `movies` | Default collection (agents + seed) |
 | `PORT` | `3000` | Express API listen port |
 
 ### Optional
@@ -320,7 +390,11 @@ Liveness check.
 ```json
 {
   "status": "ok",
-  "model": "llama3.2"
+  "model": "llama3.2",
+  "database": "sample_mflix",
+  "collection": "movies",
+  "dataLayer": "mcp",
+  "mcpServer": "mongodb-mcp-server"
 }
 ```
 
@@ -353,7 +427,10 @@ Content-Type: application/json
 ```json
 {
   "operation": "read",
-  "result": "Agent natural-language answer with query outcome..."
+  "result": "Agent natural-language answer with query outcome...",
+  "database": "sample_mflix",
+  "collection": "movies",
+  "dataLayer": "mcp"
 }
 ```
 
@@ -361,6 +438,9 @@ Content-Type: application/json
 |-------|------|-------------|
 | `operation` | `string` | Routed operation: `read`, `create`, `update`, or `delete` |
 | `result` | `string` | Final agent message |
+| `database` | `string` | Target database from `.env` (`MONGO_DB_NAME`) |
+| `collection` | `string` | Target collection from `.env` (`MONGO_COLLECTION`) |
+| `dataLayer` | `string` | Always `"mcp"` for agent queries |
 
 **Client error `400`**
 
@@ -378,7 +458,10 @@ Agent or workflow failure:
 {
   "operation": "read",
   "result": null,
-  "error": "Error message"
+  "error": "Error message",
+  "database": "sample_mflix",
+  "collection": "movies",
+  "dataLayer": "mcp"
 }
 ```
 
@@ -423,7 +506,8 @@ curl -X POST http://localhost:3000/api/query \
   "operation": "create",
   "result": "... summary with insertedId and title ...",
   "database": "sample_mflix",
-  "collection": "movies"
+  "collection": "movies",
+  "dataLayer": "mcp"
 }
 ```
 
@@ -435,7 +519,7 @@ curl -X POST http://localhost:3000/api/query \
   -H "Content-Type: application/json" \
   -d '{"question": "Insert a movie with title My New Film and year 2025 into sample_mflix.movies"}'
 
-# Multiple fields — helps the create agent map to the Mongoose schema
+# Multiple fields — clearer document shape for insert-many
 curl -X POST http://localhost:3000/api/query \
   -H "Content-Type: application/json" \
   -d '{"question": "Add a movie to sample_mflix.movies: title=\"Night Run\", year=2024, rated=\"PG-13\", runtime=110, genres=[\"Action\"]"}'
@@ -517,7 +601,7 @@ sequenceDiagram
   C->>E: question
   E->>G: invoke workflow
   G->>G: classify operation
-  G->>A: connect MCP + run agent
+  G->>A: runWithMcp (connect MCP + run agent)
   A->>M: find / insert-many / update-many / delete-many
   M->>D: MongoDB operations
   D-->>M: results
@@ -535,29 +619,51 @@ Shared entry point: `src/workflow/executeQuery.js` (used by CLI and API).
 
 ```
 .
-├── .env.example          # Environment template
+├── .env.example
 ├── package.json
 ├── README.md
 └── src/
-    ├── bootstrap.js
-    ├── index.js              # CLI
-    ├── server.js             # Express API
+    ├── bootstrap.js              # Env + tracing before other imports
+    ├── index.js                  # CLI entry
+    ├── server.js                 # API entry (listen only)
+    ├── constants/
+    │   └── operations.js         # read | create | update | delete
     ├── config/
-    ├── mcp/
-    │   ├── mongodbServer.js    # MCPServerStdio + tool filters
-    │   └── context.js
-    ├── db/                   # optional seed only
-    │   ├── connect.js
-    │   └── init.js
-    ├── schemas/              # optional seed only
+    │   ├── env.js
+    │   ├── openai.js             # Ollama / OpenAI client
+    │   └── tracing.js
+    ├── lib/
+    │   ├── errors.js
+    │   └── parseQuestion.js
+    ├── cli/
+    │   ├── banner.js
+    │   └── handleQuery.js
+    ├── http/
+    │   └── app.js                # createApp() — /health, /api/query
+    ├── workflow/
+    │   ├── router.js             # classifyOperation()
+    │   ├── state.js
+    │   ├── nodes.js
+    │   ├── graph.js
+    │   └── executeQuery.js       # shared by CLI + API
     ├── agents/
-    │   ├── readAgent.js
-    │   ├── createAgent.js
-    │   ├── updateAgent.js
-    │   ├── deleteAgent.js
+    │   ├── definitions.js
+    │   ├── factory.js
+    │   ├── runWithMcp.js
+    │   ├── baseInstructions.js
     │   └── runner.js
-    ├── scripts/initDb.js
-    └── workflow/
+    ├── mcp/
+    │   ├── toolSets.js
+    │   ├── mongodbServer.js
+    │   └── context.js
+    ├── seed/                     # not used by agents
+    │   ├── connect.js
+    │   ├── init.js
+    │   ├── movie.schema.js
+    │   └── movie.schema.json
+    └── scripts/
+        ├── initDb.js             # npm run db:init
+        └── verify.js             # npm run verify
 ```
 
 ---
@@ -628,7 +734,7 @@ origin  https://github.com/tansenkhan1990/MCP_TYEPSCRIPT_MONGODB_LANGGRAPH_OPENA
 | `Connection refused` on port 11434 | Start Ollama: `ollama serve` |
 | Model not found | `ollama pull <LOCAL_MODEL_NAME>` or fix model name in `.env` |
 | Atlas connection failed | Check connection string, IP allowlist, and DB user permissions |
-| Only `admin` / `local` before init | Run `npm run db:init` or start API (auto-inits `sample_mflix`) |
+| Only `admin` / `local` in Atlas | Run `npm run db:init`, or ask the agent to write to `sample_mflix.movies` (MCP creates DB/collection on first write) |
 | `[Tracing client error 401]` | Tracing should be off; ensure `OPENAI_AGENTS_DISABLE_TRACING=1` and restart |
 | API returns 500 | Read `error` in JSON body; check Ollama logs and Atlas connectivity |
 | Wrong operation routed | Rephrase with clearer verbs (e.g. "insert" vs "find"); see [How routing works](#how-routing-works) |

@@ -1,3 +1,5 @@
+export { OPERATIONS } from "../constants/operations.js";
+
 const READ_PATTERNS = [
   /\b(find|get|fetch|read|list|show|search|query|count|aggregate|lookup|select)\b/i,
   /\bhow many\b/i,
@@ -44,5 +46,3 @@ export function classifyOperation(userQuery) {
 function scorePatterns(text, patterns) {
   return patterns.reduce((sum, pattern) => sum + (pattern.test(text) ? 1 : 0), 0);
 }
-
-export const OPERATIONS = ["read", "create", "update", "delete"];
