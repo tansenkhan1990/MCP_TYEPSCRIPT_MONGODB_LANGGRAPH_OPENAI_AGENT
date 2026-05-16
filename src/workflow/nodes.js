@@ -1,5 +1,5 @@
-import { OPERATIONS, normalizeOperation } from "../constants/operations.js";
 import { runAgentWithMcp } from "../agents/runWithMcp.js";
+import { normalizeOperation } from "../constants/operations.js";
 import { classifyOperation } from "./router.js";
 
 export async function routeNode(state) {
@@ -11,12 +11,10 @@ export function routeToAgent(state) {
   return state.operation;
 }
 
-export function createAgentNode(operation) {
-  return async function agentNode(state) {
-    return runAgentWithMcp(state.userQuery, operation);
-  };
+/**
+ * Single executor node: uses routed `state.operation` (LangGraph best practice —
+ * route once, execute once; MCP/agent selection follows state).
+ */
+export async function executeAgentNode(state) {
+  return runAgentWithMcp(state.userQuery, state.operation);
 }
-
-export const agentNodesByOperation = Object.fromEntries(
-  OPERATIONS.map((op) => [op, createAgentNode(op)]),
-);

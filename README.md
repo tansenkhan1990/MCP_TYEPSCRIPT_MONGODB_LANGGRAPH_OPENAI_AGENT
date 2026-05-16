@@ -51,7 +51,7 @@ Ask questions in plain English via the **CLI** or **Express REST API**. LangGrap
 | Layer | Package / service |
 |-------|-------------------|
 | Workflow | [@langchain/langgraph](https://www.npmjs.com/package/@langchain/langgraph) |
-| Agents | [@openai/agents](https://www.npmjs.com/package/@openai/agents) |
+| Agents | [@openai/agents](https://www.npmjs.com/package/@openai/agents) (`Agent`, `run`, MCP) |
 | Database (agents) | [mongodb-mcp-server](https://www.npmjs.com/package/mongodb-mcp-server) via MCP stdio |
 | Optional seed | [Mongoose](https://www.npmjs.com/package/mongoose) (`npm run db:init` only) |
 | HTTP API | [Express](https://expressjs.com/) 5.x |
@@ -71,14 +71,8 @@ flowchart TB
 
   subgraph workflow [LangGraph workflow]
     Route[route node]
-    ReadN[read_agent]
-    CreateN[create_agent]
-    UpdateN[update_agent]
-    DeleteN[delete_agent]
-    Route -->|read| ReadN
-    Route -->|create| CreateN
-    Route -->|update| UpdateN
-    Route -->|delete| DeleteN
+    Exec[execute_agent]
+    Route -->|read/create/update/delete| Exec
   end
 
   subgraph agents [OpenAI Agents SDK]
@@ -95,10 +89,8 @@ flowchart TB
   CLI --> executeQuery
   API --> executeQuery
   executeQuery --> Route
-  ReadN --> RunMCP
-  CreateN --> RunMCP
-  UpdateN --> RunMCP
-  DeleteN --> RunMCP
+  Route --> Exec
+  Exec --> RunMCP
   RunMCP --> Factory
   RunMCP --> MCP
   Factory --> MCP
@@ -109,7 +101,7 @@ flowchart TB
 
 1. **Client** (`src/index.js` CLI or `src/http/app.js` API) calls `executeQuery(question)`.
 2. LangGraph **route** node classifies the operation: `read` | `create` | `update` | `delete`.
-3. The matching **agent node** calls `runAgentWithMcp()` — starts a filtered MCP stdio server, builds one agent via `createMongoAgent()`, runs the OpenAI Agents `Runner`.
+3. **`execute_agent`** reads `state.operation` and calls `runAgentWithMcp()` — filtered MCP stdio, `createMongoAgent()`, then `run()` with `maxTurns` limit.
 4. The agent calls MCP tools (`find`, `insert-many`, `update-many`, `delete-many`, etc.) against Atlas.
 5. MCP disconnects; response includes `operation`, `result`, `database`, `collection`, and `dataLayer: "mcp"`.
 
@@ -117,9 +109,29 @@ flowchart TB
 
 | Layer | Count | Notes |
 |-------|-------|--------|
-| LangGraph nodes | 5 | `route` + 4 CRUD agent nodes (built from `OPERATIONS`) |
+| LangGraph nodes | 2 | `route` (classify) + `execute_agent` (MCP + Agents SDK) |
 | OpenAI agents | 4 | Same factory; different instructions + MCP tool filters |
 | MCP servers per request | 1 | Spawned for the routed operation only |
+
+---
+
+## Design and best practices
+
+| Framework | Core concept used | How this project applies it |
+|-----------|-------------------|-----------------------------|
+| **LangGraph** | State graph, conditional edges | `route` → `execute_agent`; operation stored in state |
+| **LangGraph** | Separation of orchestration vs execution | LangGraph routes only; Agents SDK runs tools/LLM |
+| **OpenAI Agents SDK** | `Agent` + `run()` | Factory builds agents; `run(agent, input, { maxTurns })` |
+| **OpenAI Agents SDK** | MCP tools | `mcpServers` + `MCPServerStdio` per request |
+| **OpenAI Agents SDK** | Least privilege | `createMCPToolStaticFilter` per CRUD operation |
+| **MCP** | Stdio transport | Spawns `mongodb-mcp-server`; connect → use → close |
+
+**Intentional choices**
+
+- **Keyword router** (not LLM routing) — fast, deterministic, no extra model call; rephrase if misrouted.
+- **Four logical agents, one graph executor** — specialists via `definitions.js` + tool filters, not four duplicate graph nodes.
+- **MCP per request** — clean isolation; trade-off is cold-start latency.
+- **Tracing off** — required for Ollama/local models (`tracing.js` + env).
 
 ---
 
@@ -134,13 +146,15 @@ The codebase is split by responsibility so shared logic lives in one place:
 | `src/lib/parseQuestion.js` | Parse `question` or `query` from JSON body |
 | `src/workflow/router.js` | Keyword scoring → `read` \| `create` \| `update` \| `delete` |
 | `src/workflow/state.js` | LangGraph state annotation |
-| `src/workflow/nodes.js` | `routeNode`, dynamic agent nodes |
+| `src/workflow/nodes.js` | `routeNode`, `executeAgentNode` |
+| `src/constants/agentRun.js` | `AGENT_MAX_TURNS` for `run()` |
 | `src/workflow/graph.js` | Compile graph, `runWorkflow()` |
 | `src/workflow/executeQuery.js` | **Single entry** for CLI + API |
 | `src/agents/definitions.js` | Per-operation names + instructions |
 | `src/agents/factory.js` | `createMongoAgent(operation, mcpServer)` |
-| `src/agents/runWithMcp.js` | Connect MCP → run agent → close |
-| `src/agents/runner.js` | OpenAI Agents `Runner` singleton |
+| `src/agents/index.js` | Re-exports `Agent`, `run`, factory helpers |
+| `src/config/agents.js` | `configureAgentsSdk()` for `@openai/agents` |
+| `src/agents/runWithMcp.js` | Connect MCP → `run(agent, input)` → close |
 | `src/agents/baseInstructions.js` | Shared MongoDB rules for all agents |
 | `src/mcp/toolSets.js` | MCP tool allowlists per operation |
 | `src/mcp/mongodbServer.js` | `createMcpServerForOperation()` |
@@ -148,7 +162,7 @@ The codebase is split by responsibility so shared logic lives in one place:
 | `src/cli/` | CLI banner and query output |
 | `src/http/app.js` | Express app factory (`createApp()`) |
 | `src/seed/` | Optional Mongoose connect + seed (`npm run db:init` only) |
-| `src/config/` | `env.js`, Ollama/OpenAI client, tracing off |
+| `src/config/` | `env.js`, `agents.js` (Agents SDK + Ollama client), tracing off |
 | `src/bootstrap.js` | Early env + tracing setup |
 
 Entry points stay thin:
@@ -202,15 +216,29 @@ Full allowlists are defined in `src/mcp/toolSets.js`. Servers are created in `sr
 
 ## Agents
 
+All agent behavior uses **`@openai/agents`** (not the standalone Agents `Runner` class):
+
+| SDK export | Used in | Purpose |
+|------------|---------|---------|
+| `Agent` | `src/agents/factory.js` | Build specialist agents with MCP |
+| `run` | `src/agents/runWithMcp.js` | Execute agent loop (`result.finalOutput`) |
+| `MCPServerStdio` | `src/mcp/mongodbServer.js` | MongoDB MCP over stdio |
+| `createMCPToolStaticFilter` | `src/mcp/mongodbServer.js` | Per-operation tool allowlists |
+| `setDefaultOpenAIClient` | `src/config/agents.js` | Ollama / OpenAI HTTP client |
+| `setOpenAIAPI` | `src/config/agents.js` | `chat_completions` for Ollama |
+| `setTracingDisabled` | `src/config/tracing.js` | No trace export to OpenAI |
+
+Install: `npm install @openai/agents zod`
+
 There are **four logical specialists**, implemented with one factory instead of four duplicate files:
 
 | File | Purpose |
 |------|---------|
 | `src/agents/definitions.js` | Agent name + role instructions per operation |
 | `src/agents/factory.js` | `createMongoAgent(operation, mcpServer)` |
-| `src/agents/runWithMcp.js` | Lifecycle: connect MCP → run → close |
-| `src/agents/runner.js` | Shared `Runner` with tracing disabled |
+| `src/agents/runWithMcp.js` | Connect MCP → `run(agent, input)` → close |
 | `src/agents/baseInstructions.js` | Shared rules (use MCP tools, cite DB/collection) |
+| `src/config/agents.js` | `configureAgentsSdk()` — SDK client setup |
 
 To add a new operation you would extend `OPERATIONS` in `constants/operations.js`, add router patterns, tool sets, agent definitions, and LangGraph picks up the new node automatically.
 
@@ -630,8 +658,8 @@ Shared entry point: `src/workflow/executeQuery.js` (used by CLI and API).
     │   └── operations.js         # read | create | update | delete
     ├── config/
     │   ├── env.js
-    │   ├── openai.js             # Ollama / OpenAI client
-    │   └── tracing.js
+    │   ├── agents.js             # @openai/agents: client + chat_completions
+    │   └── tracing.js            # @openai/agents: disable tracing
     ├── lib/
     │   ├── errors.js
     │   └── parseQuestion.js
@@ -647,11 +675,11 @@ Shared entry point: `src/workflow/executeQuery.js` (used by CLI and API).
     │   ├── graph.js
     │   └── executeQuery.js       # shared by CLI + API
     ├── agents/
+    │   ├── index.js              # re-exports Agent, run, factory helpers
     │   ├── definitions.js
-    │   ├── factory.js
-    │   ├── runWithMcp.js
-    │   ├── baseInstructions.js
-    │   └── runner.js
+    │   ├── factory.js            # new Agent({ ... mcpServers })
+    │   ├── runWithMcp.js         # run(agent, query)
+    │   └── baseInstructions.js
     ├── mcp/
     │   ├── toolSets.js
     │   ├── mongodbServer.js

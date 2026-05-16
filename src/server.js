@@ -1,10 +1,8 @@
-import "./bootstrap.js";
-import "./config/tracing.js";
-import { configureOpenAI } from "./config/openai.js";
+import { configureAgentsSdk } from "./config/agents.js";
 import { env } from "./config/env.js";
 import { createApp } from "./http/app.js";
 
-configureOpenAI();
+configureAgentsSdk();
 
 const app = createApp();
 

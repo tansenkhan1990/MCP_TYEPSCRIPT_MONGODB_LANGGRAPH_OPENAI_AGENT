@@ -1,5 +1,5 @@
 import { Agent } from "@openai/agents";
-import { getModelName } from "../config/openai.js";
+import { getModelName } from "../config/agents.js";
 import { normalizeOperation } from "../constants/operations.js";
 import { AGENT_DEFINITIONS } from "./definitions.js";
 import { sharedMongoRules } from "./baseInstructions.js";

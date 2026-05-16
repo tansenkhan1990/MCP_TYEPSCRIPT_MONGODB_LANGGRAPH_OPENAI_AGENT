@@ -1,28 +1,25 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
-import { OPERATIONS, agentNodeId } from "../constants/operations.js";
+import { OPERATIONS } from "../constants/operations.js";
 import { env } from "../config/env.js";
 import { WorkflowState } from "./state.js";
-import { routeNode, routeToAgent, agentNodesByOperation } from "./nodes.js";
+import { routeNode, routeToAgent, executeAgentNode } from "./nodes.js";
+
+const EXECUTE_AGENT_NODE = "execute_agent";
 
 let compiledGraph;
 
 function buildWorkflowGraph() {
-  const builder = new StateGraph(WorkflowState)
+  const routeTargets = Object.fromEntries(
+    OPERATIONS.map((op) => [op, EXECUTE_AGENT_NODE]),
+  );
+
+  return new StateGraph(WorkflowState)
     .addNode("route", routeNode)
-    .addEdge(START, "route");
-
-  const conditionalTargets = {};
-
-  for (const operation of OPERATIONS) {
-    const nodeId = agentNodeId(operation);
-    builder.addNode(nodeId, agentNodesByOperation[operation]);
-    builder.addEdge(nodeId, END);
-    conditionalTargets[operation] = nodeId;
-  }
-
-  builder.addConditionalEdges("route", routeToAgent, conditionalTargets);
-
-  return builder.compile();
+    .addNode(EXECUTE_AGENT_NODE, executeAgentNode)
+    .addEdge(START, "route")
+    .addConditionalEdges("route", routeToAgent, routeTargets)
+    .addEdge(EXECUTE_AGENT_NODE, END)
+    .compile();
 }
 
 export function getWorkflowGraph() {

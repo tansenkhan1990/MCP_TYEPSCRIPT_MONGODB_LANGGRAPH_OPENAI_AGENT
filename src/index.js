@@ -1,8 +1,6 @@
-import "./bootstrap.js";
-import "./config/tracing.js";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { configureOpenAI } from "./config/openai.js";
+import { configureAgentsSdk } from "./config/agents.js";
 import { printBanner } from "./cli/banner.js";
 import { handleQuery } from "./cli/handleQuery.js";
 import { toErrorMessage } from "./lib/errors.js";
@@ -28,7 +26,7 @@ async function runInteractive() {
 }
 
 async function main() {
-  configureOpenAI();
+  configureAgentsSdk();
 
   const cliQuery = process.argv.slice(2).join(" ").trim();
   if (cliQuery) {
