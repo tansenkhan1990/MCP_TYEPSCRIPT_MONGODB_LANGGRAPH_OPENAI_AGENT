@@ -406,12 +406,46 @@ curl http://localhost:3000/health
 # Read
 curl -X POST http://localhost:3000/api/query \
   -H "Content-Type: application/json" \
-  -d '{"question": "List all databases"}'
+  -d '{"question": "Find all movies in sample_mflix.movies"}'
 
-# Create
+# Create a movie
+# Prerequisite: npm run api (and Ollama running). DB/collection are created on first request if missing.
 curl -X POST http://localhost:3000/api/query \
   -H "Content-Type: application/json" \
-  -d '{"question": "Insert a movie { \"title\": \"Agent Demo\", \"year\": 2026 } into sample_mflix.movies"}'
+  -d '{"question": "Create a movie in sample_mflix.movies with title Agent Demo, year 2026, genres [\"Sci-Fi\", \"Drama\"], and plot A test movie inserted via the API"}'
+```
+
+**Expected response (create):**
+
+```json
+{
+  "operation": "create",
+  "result": "... summary with insertedId and title ...",
+  "database": "sample_mflix",
+  "collection": "movies"
+}
+```
+
+**More create examples** (same endpoint, change the `question`):
+
+```bash
+# Minimal — title + year only
+curl -X POST http://localhost:3000/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Insert a movie with title My New Film and year 2025 into sample_mflix.movies"}'
+
+# Multiple fields — helps the create agent map to the Mongoose schema
+curl -X POST http://localhost:3000/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Add a movie to sample_mflix.movies: title=\"Night Run\", year=2024, rated=\"PG-13\", runtime=110, genres=[\"Action\"]"}'
+```
+
+**Verify the insert (read):**
+
+```bash
+curl -X POST http://localhost:3000/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Find movies in sample_mflix.movies where title is Agent Demo"}'
 
 # Update
 curl -X POST http://localhost:3000/api/query \
