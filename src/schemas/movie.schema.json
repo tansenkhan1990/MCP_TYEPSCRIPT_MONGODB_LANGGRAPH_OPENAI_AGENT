@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Movie",
+  "description": "Document shape for the movies collection (sample_mflix-style). MongoDB creates the database on first write.",
+  "type": "object",
+  "required": ["title"],
+  "properties": {
+    "title": { "type": "string", "description": "Movie title" },
+    "year": { "type": "integer", "description": "Release year" },
+    "genres": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Genre labels"
+    },
+    "plot": { "type": "string", "description": "Short plot summary" },
+    "rated": { "type": "string", "description": "Content rating (e.g. PG-13)" },
+    "runtime": { "type": "integer", "description": "Runtime in minutes" },
+    "imdb": {
+      "type": "object",
+      "properties": {
+        "rating": { "type": "number" },
+        "votes": { "type": "integer" }
+      }
+    }
+  },
+  "additionalProperties": true
+}
