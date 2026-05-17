@@ -1,7 +1,5 @@
-/**
- * OpenAI Agents SDK surface used by this project.
- * @see https://openai.github.io/openai-agents-js/
- */
 export { Agent, run } from "@openai/agents";
-export { createMongoAgent } from "./factory.js";
-export { runAgentWithMcp } from "./runWithMcp.js";
+export { createAgentForOperation } from "./factory.js";
+export { runForOperation } from "./dispatch.js";
+export { executeAgent } from "./runAgent.js";
+export { duckDuckGoSearchTool } from "./tools/duckduckgo/tool.js";

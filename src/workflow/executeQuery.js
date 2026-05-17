@@ -1,16 +1,17 @@
 import { runWorkflow } from "./graph.js";
 
 /**
- * LangGraph orchestration → OpenAI Agent (MCP tools) → MongoDB Atlas.
+ * Single entry: LangGraph route → agent dispatch (MongoDB MCP or DuckDuckGo web).
  */
 export async function executeQuery(question) {
   const state = await runWorkflow(question);
-  return {
+  const outcome = {
     operation: state.operation,
     result: state.result,
     error: state.error,
-    database: state.database,
-    collection: state.collection,
     dataLayer: state.dataLayer,
   };
+  if (state.database != null) outcome.database = state.database;
+  if (state.collection != null) outcome.collection = state.collection;
+  return outcome;
 }

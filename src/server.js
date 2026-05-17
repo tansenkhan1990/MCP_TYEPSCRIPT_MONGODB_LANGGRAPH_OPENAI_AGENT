@@ -1,3 +1,4 @@
+import "./bootstrap.js";
 import { configureAgentsSdk } from "./config/agents.js";
 import { env } from "./config/env.js";
 import { createApp } from "./http/app.js";

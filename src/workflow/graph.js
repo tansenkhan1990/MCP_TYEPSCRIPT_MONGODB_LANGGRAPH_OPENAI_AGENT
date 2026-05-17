@@ -1,5 +1,5 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
-import { OPERATIONS } from "../constants/operations.js";
+import { getDataLayer, isMongoOperation, OPERATIONS } from "../constants/operations.js";
 import { env } from "../config/env.js";
 import { WorkflowState } from "./state.js";
 import { routeNode, routeToAgent, executeAgentNode } from "./nodes.js";
@@ -37,10 +37,14 @@ export async function runWorkflow(userQuery) {
     result: null,
     error: null,
   });
+
+  const operation = finalState.operation;
   return {
     ...finalState,
-    database: env.mongoDbName,
-    collection: env.mongoCollection,
-    dataLayer: "mcp",
+    dataLayer: getDataLayer(operation),
+    ...(isMongoOperation(operation) && {
+      database: env.mongoDbName,
+      collection: env.mongoCollection,
+    }),
   };
 }

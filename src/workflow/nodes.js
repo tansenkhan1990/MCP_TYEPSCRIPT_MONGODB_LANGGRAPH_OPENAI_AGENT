@@ -1,4 +1,4 @@
-import { runAgentWithMcp } from "../agents/runWithMcp.js";
+import { runForOperation } from "../agents/dispatch.js";
 import { normalizeOperation } from "../constants/operations.js";
 import { classifyOperation } from "./router.js";
 
@@ -11,10 +11,6 @@ export function routeToAgent(state) {
   return state.operation;
 }
 
-/**
- * Single executor node: uses routed `state.operation` (LangGraph best practice —
- * route once, execute once; MCP/agent selection follows state).
- */
 export async function executeAgentNode(state) {
-  return runAgentWithMcp(state.userQuery, state.operation);
+  return runForOperation(state.operation, state.userQuery);
 }

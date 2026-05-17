@@ -1,10 +1,15 @@
-export function parseQuestionFromBody(body) {
-  const question =
-    typeof body?.question === "string"
-      ? body.question
-      : typeof body?.query === "string"
-        ? body.query
-        : "";
+const QUESTION_KEYS = ["question", "query"];
 
-  return question.trim();
+export function parseQuestionFromBody(body) {
+  if (!body || typeof body !== "object") {
+    return "";
+  }
+
+  for (const key of QUESTION_KEYS) {
+    if (typeof body[key] === "string" && body[key].trim()) {
+      return body[key].trim();
+    }
+  }
+
+  return "";
 }

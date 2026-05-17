@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MCPServerStdio, createMCPToolStaticFilter } from "@openai/agents";
-import { normalizeOperation } from "../constants/operations.js";
+import { isMongoOperation, normalizeOperation } from "../constants/operations.js";
 import { env } from "../config/env.js";
 import { MCP_TOOL_SETS } from "./toolSets.js";
 
@@ -30,5 +30,8 @@ function createFilteredServer(name, allowedTools) {
 
 export function createMcpServerForOperation(operation) {
   const op = normalizeOperation(operation);
+  if (!isMongoOperation(op)) {
+    throw new Error(`createMcpServerForOperation does not support operation: ${op}`);
+  }
   return createFilteredServer(op, MCP_TOOL_SETS[op]);
 }

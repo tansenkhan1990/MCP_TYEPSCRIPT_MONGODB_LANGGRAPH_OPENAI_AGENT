@@ -35,7 +35,7 @@ Ask questions in plain English via the **CLI** or **Express REST API**. LangGrap
 
 ## Features
 
-- **Four specialist agents** — one logical agent per CRUD operation (shared factory, per-operation instructions)
+- **Five routed agents** — MongoDB CRUD (read/create/update/delete) + **web search** (DuckDuckGo)
 - **LangGraph workflow** — automatic routing based on your question (no extra LLM call for routing)
 - **MongoDB MCP CRUD** — `find`, `insert-many`, `update-many`, `delete-many` via official MCP server
 - **Least-privilege MCP tools** — each operation gets a filtered tool allowlist only
@@ -77,7 +77,7 @@ flowchart TB
 
   subgraph agents [OpenAI Agents SDK]
     Factory[createMongoAgent]
-    RunMCP[runWithMcp]
+    Dispatch[runForOperation]
   end
 
   subgraph mcp [MongoDB MCP stdio]
@@ -90,8 +90,8 @@ flowchart TB
   API --> executeQuery
   executeQuery --> Route
   Route --> Exec
-  Exec --> RunMCP
-  RunMCP --> Factory
+  Exec --> Dispatch
+  Dispatch --> Factory
   RunMCP --> MCP
   Factory --> MCP
   MCP --> Atlas
@@ -100,7 +100,7 @@ flowchart TB
 **High-level flow**
 
 1. **Client** (`src/index.js` CLI or `src/http/app.js` API) calls `executeQuery(question)`.
-2. LangGraph **route** node classifies the operation: `read` | `create` | `update` | `delete`.
+2. LangGraph **route** node classifies the operation: `read` | `create` | `update` | `delete` | `web`.
 3. **`execute_agent`** reads `state.operation` and calls `runAgentWithMcp()` — filtered MCP stdio, `createMongoAgent()`, then `run()` with `maxTurns` limit.
 4. The agent calls MCP tools (`find`, `insert-many`, `update-many`, `delete-many`, etc.) against Atlas.
 5. MCP disconnects; response includes `operation`, `result`, `database`, `collection`, and `dataLayer: "mcp"`.
@@ -151,10 +151,10 @@ The codebase is split by responsibility so shared logic lives in one place:
 | `src/workflow/graph.js` | Compile graph, `runWorkflow()` |
 | `src/workflow/executeQuery.js` | **Single entry** for CLI + API |
 | `src/agents/definitions.js` | Per-operation names + instructions |
-| `src/agents/factory.js` | `createMongoAgent(operation, mcpServer)` |
+| `src/agents/factory.js` | `createAgentForOperation(operation, mcpServer?)` |
+| `src/agents/dispatch.js` | `runForOperation(operation, userQuery)` |
 | `src/agents/index.js` | Re-exports `Agent`, `run`, factory helpers |
 | `src/config/agents.js` | `configureAgentsSdk()` for `@openai/agents` |
-| `src/agents/runWithMcp.js` | Connect MCP → `run(agent, input)` → close |
 | `src/agents/baseInstructions.js` | Shared MongoDB rules for all agents |
 | `src/mcp/toolSets.js` | MCP tool allowlists per operation |
 | `src/mcp/mongodbServer.js` | `createMcpServerForOperation()` |
@@ -182,12 +182,14 @@ Routing is implemented in `src/workflow/router.js` using keyword pattern scoring
 | **create** | create, insert, add, seed, register |
 | **update** | update, modify, change, set, patch, edit, replace |
 | **delete** | delete, remove, drop, purge, clear |
+| **web** | search the web, search online, duckduckgo, on the internet, latest news, who is (no MongoDB context) |
 
 Rules:
 
 - The operation with the **highest pattern score** wins.
 - If nothing matches, defaults to **read**.
-- On a tie, priority is: `delete` → `update` → `create` → `read`.
+- On a tie, priority is: `delete` → `update` → `create` → `web` → `read`.
+- Questions with **MongoDB context** (`sample_mflix`, `movies`, `collection`, etc.) stay on CRUD even if they mention “online”.
 
 The API and CLI responses include `operation` so you can see which route was chosen.
 
@@ -221,7 +223,7 @@ All agent behavior uses **`@openai/agents`** (not the standalone Agents `Runner`
 | SDK export | Used in | Purpose |
 |------------|---------|---------|
 | `Agent` | `src/agents/factory.js` | Build specialist agents with MCP |
-| `run` | `src/agents/runWithMcp.js` | Execute agent loop (`result.finalOutput`) |
+| `run` | `src/agents/runAgent.js` | Execute agent loop (`result.finalOutput`) |
 | `MCPServerStdio` | `src/mcp/mongodbServer.js` | MongoDB MCP over stdio |
 | `createMCPToolStaticFilter` | `src/mcp/mongodbServer.js` | Per-operation tool allowlists |
 | `setDefaultOpenAIClient` | `src/config/agents.js` | Ollama / OpenAI HTTP client |
@@ -230,14 +232,16 @@ All agent behavior uses **`@openai/agents`** (not the standalone Agents `Runner`
 
 Install: `npm install @openai/agents zod`
 
-There are **four logical specialists**, implemented with one factory instead of four duplicate files:
+There are **five logical specialists** (four CRUD + web), implemented with one factory:
 
 | File | Purpose |
 |------|---------|
 | `src/agents/definitions.js` | Agent name + role instructions per operation |
-| `src/agents/factory.js` | `createMongoAgent(operation, mcpServer)` |
-| `src/agents/runWithMcp.js` | Connect MCP → `run(agent, input)` → close |
-| `src/agents/baseInstructions.js` | Shared rules (use MCP tools, cite DB/collection) |
+| `src/agents/factory.js` | `createAgentForOperation(operation, mcpServer?)` |
+| `src/agents/dispatch.js` | MongoDB MCP lifecycle or web agent (no MCP) |
+| `src/agents/runAgent.js` | Shared `run(agent, input)` wrapper |
+| `src/agents/tools/duckduckgo/` | Web search tool + provider fallbacks |
+| `src/agents/baseInstructions.js` | Shared MongoDB rules |
 | `src/config/agents.js` | `configureAgentsSdk()` — SDK client setup |
 
 To add a new operation you would extend `OPERATIONS` in `constants/operations.js`, add router patterns, tool sets, agent definitions, and LangGraph picks up the new node automatically.
@@ -464,7 +468,7 @@ Content-Type: application/json
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `operation` | `string` | Routed operation: `read`, `create`, `update`, or `delete` |
+| `operation` | `string` | Routed operation: `read`, `create`, `update`, `delete`, or `web` |
 | `result` | `string` | Final agent message |
 | `database` | `string` | Target database from `.env` (`MONGO_DB_NAME`) |
 | `collection` | `string` | Target collection from `.env` (`MONGO_COLLECTION`) |
@@ -612,6 +616,18 @@ Include **database** and **collection** in the question when possible (e.g. `sam
 | Create | `Insert a movie with title "Agent Demo" and year 2026 into sample_mflix.movies` |
 | Update | `Set genre to "demo" for movies titled "Agent Demo" in sample_mflix.movies` |
 | Delete | `Delete movies with title "Agent Demo" from sample_mflix.movies` |
+| Web | `Search the web for the latest Node.js LTS release notes` |
+| Web | `Who is the current CEO of MongoDB? Use duckduckgo` |
+
+**Web search** (same `POST /api/query`):
+
+```bash
+curl -X POST http://localhost:3000/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Search online for what LangGraph is used for"}'
+```
+
+Response includes `"operation": "web"` and `"dataLayer": "duckduckgo"`.
 
 ---
 
@@ -629,7 +645,7 @@ sequenceDiagram
   C->>E: question
   E->>G: invoke workflow
   G->>G: classify operation
-  G->>A: runWithMcp (connect MCP + run agent)
+  G->>A: runForOperation (MCP or web)
   A->>M: find / insert-many / update-many / delete-many
   M->>D: MongoDB operations
   D-->>M: results
@@ -655,7 +671,7 @@ Shared entry point: `src/workflow/executeQuery.js` (used by CLI and API).
     ├── index.js                  # CLI entry
     ├── server.js                 # API entry (listen only)
     ├── constants/
-    │   └── operations.js         # read | create | update | delete
+    │   └── operations.js         # read | create | update | delete | web
     ├── config/
     │   ├── env.js
     │   ├── agents.js             # @openai/agents: client + chat_completions
@@ -667,7 +683,9 @@ Shared entry point: `src/workflow/executeQuery.js` (used by CLI and API).
     │   ├── banner.js
     │   └── handleQuery.js
     ├── http/
-    │   └── app.js                # createApp() — /health, /api/query
+    │   ├── app.js                # createApp() — /health, /api/query
+    │   ├── formatResponse.js
+    │   └── lenientBodyParser.js
     ├── workflow/
     │   ├── router.js             # classifyOperation()
     │   ├── state.js
@@ -675,10 +693,11 @@ Shared entry point: `src/workflow/executeQuery.js` (used by CLI and API).
     │   ├── graph.js
     │   └── executeQuery.js       # shared by CLI + API
     ├── agents/
-    │   ├── index.js              # re-exports Agent, run, factory helpers
+    │   ├── dispatch.js           # runForOperation
+    │   ├── runAgent.js
+    │   ├── factory.js
     │   ├── definitions.js
-    │   ├── factory.js            # new Agent({ ... mcpServers })
-    │   ├── runWithMcp.js         # run(agent, query)
+    │   ├── tools/duckduckgo/
     │   └── baseInstructions.js
     ├── mcp/
     │   ├── toolSets.js
