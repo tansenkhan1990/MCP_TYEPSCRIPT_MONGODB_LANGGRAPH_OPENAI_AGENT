@@ -1,6 +1,5 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
-import { getDataLayer, isMongoOperation, OPERATIONS } from "../constants/operations.js";
-import { env } from "../config/env.js";
+import { OPERATIONS } from "../constants/operations.js";
 import { WorkflowState } from "./state.js";
 import { routeNode, routeToAgent, executeAgentNode } from "./nodes.js";
 
@@ -31,20 +30,10 @@ export function getWorkflowGraph() {
 
 export async function runWorkflow(userQuery) {
   const graph = getWorkflowGraph();
-  const finalState = await graph.invoke({
+  return graph.invoke({
     userQuery,
     operation: null,
     result: null,
     error: null,
   });
-
-  const operation = finalState.operation;
-  return {
-    ...finalState,
-    dataLayer: getDataLayer(operation),
-    ...(isMongoOperation(operation) && {
-      database: env.mongoDbName,
-      collection: env.mongoCollection,
-    }),
-  };
 }

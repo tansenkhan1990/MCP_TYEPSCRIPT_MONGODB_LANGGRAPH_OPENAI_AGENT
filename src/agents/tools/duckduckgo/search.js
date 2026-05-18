@@ -1,3 +1,4 @@
+import { toErrorMessage } from "../../../lib/errors.js";
 import {
   isNewsQuery,
   isRateLimitError,
@@ -32,7 +33,6 @@ export async function searchDuckDuckGo(query) {
 
     return `No DuckDuckGo results for: ${trimmed}`;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return `DuckDuckGo search failed for "${trimmed}": ${message}`;
+    return `DuckDuckGo search failed for "${trimmed}": ${toErrorMessage(err)}`;
   }
 }

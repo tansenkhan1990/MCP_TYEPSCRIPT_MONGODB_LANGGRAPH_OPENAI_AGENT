@@ -16,6 +16,14 @@ function parsePort(value) {
   return port;
 }
 
+function parsePositiveInt(value, fallback) {
+  const n = Number.parseInt(value ?? String(fallback), 10);
+  if (!Number.isFinite(n) || n < 1) {
+    return fallback;
+  }
+  return n;
+}
+
 export const env = {
   openaiBaseUrl: process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com/v1",
   openaiApiKey: requireEnv("OPENAI_API_KEY"),
@@ -24,4 +32,7 @@ export const env = {
   mongoDbName: process.env.MONGO_DB_NAME?.trim() || "sample_mflix",
   mongoCollection: process.env.MONGO_COLLECTION?.trim() || "movies",
   port: parsePort(process.env.PORT),
+  pdfMaxUploadBytes: parsePositiveInt(process.env.PDF_MAX_UPLOAD_MB, 15) * 1024 * 1024,
+  ragChunkSize: parsePositiveInt(process.env.RAG_CHUNK_SIZE, 1000),
+  ragChunkOverlap: parsePositiveInt(process.env.RAG_CHUNK_OVERLAP, 150),
 };

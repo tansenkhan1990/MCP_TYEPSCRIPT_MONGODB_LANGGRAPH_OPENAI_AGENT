@@ -12,13 +12,17 @@ export function createAgentForOperation(operation, mcpServer = null) {
     throw new Error(`Unknown operation: ${op}`);
   }
 
+  const base = {
+    name: definition.name,
+    model: getModelName(),
+    modelSettings: definition.modelSettings,
+  };
+
   if (isWebOperation(op)) {
     return new Agent({
-      name: definition.name,
+      ...base,
       instructions: definition.roleInstructions,
-      model: getModelName(),
       tools: definition.tools,
-      modelSettings: definition.modelSettings,
     });
   }
 
@@ -31,11 +35,9 @@ export function createAgentForOperation(operation, mcpServer = null) {
     : definition.roleInstructions;
 
   return new Agent({
-    name: definition.name,
+    ...base,
     instructions,
-    model: getModelName(),
     mcpServers: [mcpServer],
     mcpConfig: { includeServerInToolNames: true },
-    modelSettings: definition.modelSettings,
   });
 }

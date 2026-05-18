@@ -1,22 +1,11 @@
-import { env } from "../config/env.js";
-import { isMongoOperation } from "../constants/operations.js";
-
-function mongoMeta(operation) {
-  if (!isMongoOperation(operation)) {
-    return {};
-  }
-  return {
-    database: env.mongoDbName,
-    collection: env.mongoCollection,
-  };
-}
+import { getMongoScope } from "../constants/operations.js";
 
 export function formatQuerySuccess(outcome) {
   return {
     operation: outcome.operation,
     result: outcome.result,
     dataLayer: outcome.dataLayer,
-    ...mongoMeta(outcome.operation),
+    ...getMongoScope(outcome.operation),
   };
 }
 
@@ -26,6 +15,6 @@ export function formatQueryError(outcome) {
     result: null,
     error: outcome.error,
     dataLayer: outcome.dataLayer,
-    ...mongoMeta(outcome.operation),
+    ...getMongoScope(outcome.operation),
   };
 }

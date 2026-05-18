@@ -2,7 +2,8 @@
  * CI-safe smoke checks (no Atlas / Ollama / DuckDuckGo required).
  */
 import { formatQuerySuccess } from "../http/formatResponse.js";
-import { classifyOperation, OPERATIONS } from "../workflow/router.js";
+import { OPERATIONS } from "../constants/operations.js";
+import { classifyOperation } from "../workflow/router.js";
 
 const cases = [
   ["Find all movies in sample_mflix.movies", "read"],
@@ -22,9 +23,27 @@ for (const [query, expected] of cases) {
   }
 }
 
-if (OPERATIONS.length !== 5) {
-  console.error("Expected 5 operations (read, create, update, delete, web)");
+if (OPERATIONS.length !== 7) {
+  console.error(
+    "Expected 7 operations (read, create, update, delete, rag, inventory, web)",
+  );
   process.exit(1);
+}
+
+const ragCases = [
+  ["What does the research paper say about the main findings?", "rag"],
+  ["Summarize my uploaded PDF", "rag"],
+  ["What company data do we have about KG?", "inventory"],
+  ["What internal data do we have?", "inventory"],
+  ["Find comedy movies in sample_mflix.movies", "read"],
+];
+
+for (const [query, expected] of ragCases) {
+  const actual = classifyOperation(query);
+  if (actual !== expected) {
+    console.error(`RAG router failed: "${query}" => ${actual}, expected ${expected}`);
+    process.exit(1);
+  }
 }
 
 const webPayload = formatQuerySuccess({
@@ -48,4 +67,5 @@ if (!readPayload.database || !readPayload.collection) {
 }
 
 console.log("verify: router OK");
+console.log("verify: rag & inventory routing OK");
 console.log("verify: response shape OK");

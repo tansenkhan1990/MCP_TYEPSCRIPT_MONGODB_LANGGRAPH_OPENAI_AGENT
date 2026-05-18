@@ -1,6 +1,7 @@
 import { connectDatabase } from "./connect.js";
 import { getMovieModel } from "./movie.schema.js";
 import { env } from "../config/env.js";
+import { ensureRagCollections } from "../rag/ensureRagCollections.js";
 
 const SEED_MOVIES = [
   {
@@ -47,12 +48,15 @@ export async function ensureDatabase() {
     await Movie.insertMany(SEED_MOVIES);
   }
 
+  const rag = await ensureRagCollections();
+
   initialized = true;
   return {
     database: env.mongoDbName,
     collection: env.mongoCollection,
     documentCount: await Movie.countDocuments(),
     seeded: count === 0,
+    ragCollections: rag,
   };
 }
 

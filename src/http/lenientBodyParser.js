@@ -37,6 +37,10 @@ export function lenientBodyParser(req, res, next) {
 
   const contentType = (req.headers["content-type"] || "").toLowerCase();
 
+  if (contentType.includes("multipart/form-data")) {
+    return next();
+  }
+
   if (contentType.includes("application/x-www-form-urlencoded")) {
     return readBody(req, res, (raw) => {
       const params = new URLSearchParams(raw);

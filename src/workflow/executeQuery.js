@@ -1,17 +1,10 @@
+import { configureAgentsSdk } from "../config/agents.js";
 import { runWorkflow } from "./graph.js";
+import { toQueryOutcome } from "./outcome.js";
 
-/**
- * Single entry: LangGraph route → agent dispatch (MongoDB MCP or DuckDuckGo web).
- */
+/** Single entry for CLI and API: LangGraph route → agent dispatch (MongoDB MCP or web). */
 export async function executeQuery(question) {
+  configureAgentsSdk();
   const state = await runWorkflow(question);
-  const outcome = {
-    operation: state.operation,
-    result: state.result,
-    error: state.error,
-    dataLayer: state.dataLayer,
-  };
-  if (state.database != null) outcome.database = state.database;
-  if (state.collection != null) outcome.collection = state.collection;
-  return outcome;
+  return toQueryOutcome(state);
 }

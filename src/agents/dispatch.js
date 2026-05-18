@@ -1,16 +1,22 @@
-import { configureAgentsSdk } from "../config/agents.js";
-import { isMongoOperation, isWebOperation, normalizeOperation } from "../constants/operations.js";
+import { isMongoOperation, normalizeOperation } from "../constants/operations.js";
+import { queryInventory } from "../data/inventory.js";
+import { queryRag } from "../rag/queryRag.js";
 import { createMcpServerForOperation } from "../mcp/mongodbServer.js";
 import { createAgentForOperation } from "./factory.js";
 import { executeAgent } from "./runAgent.js";
 
+const DIRECT_HANDLERS = {
+  inventory: queryInventory,
+  rag: queryRag,
+  web: (userQuery) => executeAgent(createAgentForOperation("web"), userQuery),
+};
+
 export async function runForOperation(operation, userQuery) {
-  configureAgentsSdk();
-
   const op = normalizeOperation(operation);
+  const direct = DIRECT_HANDLERS[op];
 
-  if (isWebOperation(op)) {
-    return await executeAgent(createAgentForOperation(op), userQuery);
+  if (direct) {
+    return direct(userQuery);
   }
 
   if (!isMongoOperation(op)) {
@@ -21,7 +27,7 @@ export async function runForOperation(operation, userQuery) {
   await mcpServer.connect();
 
   try {
-    return await executeAgent(createAgentForOperation(op, mcpServer), userQuery);
+    return executeAgent(createAgentForOperation(op, mcpServer), userQuery);
   } finally {
     await mcpServer.close();
   }

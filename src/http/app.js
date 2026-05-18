@@ -1,11 +1,14 @@
 import express from "express";
 import { env } from "../config/env.js";
 import { OPERATIONS } from "../constants/operations.js";
+import { INTERNAL_DATA_SOURCES } from "../constants/dataSources.js";
+import { VECTORLESS_RAG_COLLECTION } from "../constants/rag.js";
 import { toErrorMessage } from "../lib/errors.js";
 import { parseQuestionFromBody } from "../lib/parseQuestion.js";
 import { executeQuery } from "../workflow/executeQuery.js";
 import { formatQueryError, formatQuerySuccess } from "./formatResponse.js";
 import { lenientBodyParser } from "./lenientBodyParser.js";
+import { registerUploadPdfRoute } from "./uploadPdfRoute.js";
 
 export function createApp() {
   const app = express();
@@ -19,8 +22,23 @@ export function createApp() {
       database: env.mongoDbName,
       collection: env.mongoCollection,
       operations: OPERATIONS,
+      ragCollection: VECTORLESS_RAG_COLLECTION,
+      internalDataSources: INTERNAL_DATA_SOURCES.map((s) => ({
+        id: s.id,
+        label: s.label,
+        database: s.database(),
+        collection: s.collection(),
+      })),
+      uploadEndpoint: "POST /api/upload-pdf",
+      queryExamples: {
+        inventory: 'What company data do we have about KG?',
+        rag: 'What does the research paper say about the main findings?',
+        movies: 'Find comedy movies in sample_mflix.movies',
+      },
     });
   });
+
+  registerUploadPdfRoute(app);
 
   app.post("/api/query", async (req, res) => {
     const question = parseQuestionFromBody(req.body);
